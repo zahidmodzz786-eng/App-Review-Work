@@ -2,19 +2,18 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 
-// Fix for fetch in Node.js
+// fetch fix for Node.js
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 const app = express();
 
-// Middlewares
 app.use(cors());
 app.use(express.json({ limit: '20mb' }));
 
-// Serve static files (IMPORTANT)
+// Serve frontend
 app.use(express.static(__dirname));
 
-// Home route fix (VERY IMPORTANT)
+// Home route
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
@@ -39,14 +38,23 @@ app.post('/api/extract', async (req, res) => {
     });
 
     const data = await response.json();
+
+    // Debug log (IMPORTANT)
+    console.log("API RESPONSE:", data);
+
+    if (data.error) {
+      return res.status(500).json({ error: data.error.message });
+    }
+
     res.json(data);
 
   } catch (err) {
+    console.log("SERVER ERROR:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// PORT fix (for Railway)
+// PORT (Railway fix)
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
