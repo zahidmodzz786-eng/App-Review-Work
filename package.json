@@ -1,7 +1,7 @@
 {
   "name": "review-name-extractor",
   "version": "1.0.0",
-  "description": "AI Review Name Extractor App",
+  "description": "AI Review Name Extractor",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
