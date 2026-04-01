@@ -1,104 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Review Name Extractor</title>
+</head>
+
+<body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding:20px">
+
+<h2>Upload Images</h2>
+<input type="file" id="fi" multiple accept="image/*"><br><br>
+<button onclick="extractAll()">Extract Names</button>
+
+<pre id="output" style="margin-top:20px;text-align:left;"></pre>
+
 <script>
 const fi = document.getElementById('fi');
-const drop = document.getElementById('drop');
-const thumbsEl = document.getElementById('thumbs');
-const runBtn = document.getElementById('runBtn');
-const resultsEl = document.getElementById('results');
-const grid = document.getElementById('grid');
-const summary = document.getElementById('summary');
-let files = [];
-
-drop.addEventListener('dragover', e=>{e.preventDefault();drop.classList.add('over')});
-drop.addEventListener('dragleave', ()=>drop.classList.remove('over'));
-drop.addEventListener('drop', e=>{e.preventDefault();drop.classList.remove('over');addFiles(e.dataTransfer.files)});
-fi.addEventListener('change', ()=>{addFiles(fi.files);fi.value=''});
-
-function addFiles(list) {
-  const rem = 20 - files.length;
-  if(rem<=0){toast('Max 20 images reached');return}
-  Array.from(list).slice(0,rem).forEach(f=>{
-    const r=new FileReader();
-    r.onload=e=>{files.push({file:f,url:e.target.result,name:null,status:'pending'});render()};
-    r.readAsDataURL(f);
-  });
-}
-
-function render() {
-  thumbsEl.innerHTML = files.map((f,i)=>`
-    <div class="thumb">
-      <img src="${f.url}"/>
-      <button class="rm" onclick="del(${i})">✕</button>
-      ${f.status==='done'?'<div class="chip done">✓ Done</div>':''}
-      ${f.status==='processing'?'<div class="chip proc">···</div>':''}
-      ${f.status==='error'?'<div class="chip err">Error</div>':''}
-    </div>`).join('');
-  runBtn.style.display = files.length?'flex':'none';
-}
-
-function del(i){files.splice(i,1);render();if(!files.length)resultsEl.style.display='none'}
+const output = document.getElementById('output');
 
 async function extractAll() {
-  runBtn.classList.add('loading');runBtn.disabled=true;
-  resultsEl.style.display='none';grid.innerHTML='';
-  files.forEach(f=>{f.status='pending';f.name=null});render();
+  const files = fi.files;
+  if (!files.length) return alert("Upload images first");
 
-  for(let i=0;i<files.length;i++){
-    files[i].status='processing';render();
-    try{files[i].name=await extractName(files[i].url);files[i].status='done'}
-    catch(e){files[i].status='error'}
-    render();
+  output.textContent = "Processing...\n";
+
+  for (let i = 0; i < files.length; i++) {
+    try {
+      const base64 = await toBase64(files[i]);
+
+      const res = await fetch(`${window.location.origin}/api/extract`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: "claude-3-haiku-20240307",
+          max_tokens: 200,
+          messages: [{
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: files[i].type,
+                  data: base64.split(',')[1]
+                }
+              },
+              {
+                type: "text",
+                text: "Extract all reviewer names. Only names, one per line."
+              }
+            ]
+          }]
+        })
+      });
+
+      const data = await res.json();
+
+      // SAFE ERROR HANDLING
+      if (data.error) {
+        console.log("API ERROR:", data.error);
+        output.textContent += `❌ Error in image ${i+1}\n`;
+        continue;
+      }
+
+      if (!data.content || !data.content[0]) {
+        output.textContent += `❌ Invalid response ${i+1}\n`;
+        continue;
+      }
+
+      const text = data.content[0].text.trim();
+      output.textContent += `✅ Image ${i+1}:\n${text}\n\n`;
+
+    } catch (err) {
+      console.log("JS ERROR:", err);
+      output.textContent += `❌ Failed ${i+1}\n`;
+    }
   }
-  runBtn.classList.remove('loading');runBtn.disabled=false;
-  showResults();
 }
 
-async function extractName(dataUrl) {
-  const base64=dataUrl.split(',')[1];
-  const mt=(dataUrl.match(/data:(image\/\w+);/)||[])[1]||'image/jpeg';
-
-  const res = await fetch(`${window.location.origin}/api/extract`, {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      model:'claude-3-haiku-20240307',
-      max_tokens:200,
-      messages:[{
-        role:'user',
-        content:[
-          {type:'image',source:{type:'base64',media_type:mt,data:base64}},
-          {type:'text',text:'Extract ALL reviewer names. Only names, one per line. If none, return Unknown.'}
-        ]
-      }]
-    })
+function toBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
   });
-
-  const data = await res.json();
-
-  if(data.error) throw new Error(data.error);
-
-  return data.content[0].text.trim();
 }
-
-function showResults() {
-  const done=files.filter(f=>f.status==='done');
-  const errs=files.filter(f=>f.status==='error').length;
-  summary.textContent=`Extracted ${done.length} images · ${errs} failed`;
-  grid.innerHTML='';
-  let idx=0;
-
-  files.forEach(f=>{
-    if(f.status!=='done')return;
-    f.name.split('\n').map(n=>n.trim()).filter(Boolean).forEach(name=>{
-      idx++;
-      const row=document.createElement('div');
-      row.className='row';
-      row.innerHTML=`<span class="num">${idx}</span><span class="val">${name}</span>`;
-      grid.appendChild(row);
-    });
-  });
-
-  resultsEl.style.display='block';
-}
-
-function toast(msg){alert(msg);}
 </script>
+
+</body>
+</html>
